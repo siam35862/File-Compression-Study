@@ -1,0 +1,173 @@
+noobcod3r-rtx@noobcod3r-rtx ~/D/G/C/p/src (main)> clang++ -O3 paq9a.cpp -o paq9a                (base)
+paq9a.cpp:468:60: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  468 |     return pr=(x1=p1)*(wt[cxt]>>16)+(x2=p2)*(wt[cxt+1]>>16)+128>>8;
+      |               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+paq9a.cpp:468:60: note: place parentheses around the '+' expression to silence this warning
+  468 |     return pr=(x1=p1)*(wt[cxt]>>16)+(x2=p2)*(wt[cxt+1]>>16)+128>>8;
+      |                                                            ^
+      |               (                                                )
+paq9a.cpp:475:12: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  475 |     err=err+8>>4;
+      |         ~~~^~~~
+paq9a.cpp:475:12: note: place parentheses around the '+' expression to silence this warning
+  475 |     err=err+8>>4;
+      |            ^
+      |         (    )
+paq9a.cpp:645:43: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  645 |   pr=a1.pp(2048, pr*2, h2*256+pc&0xffff)*3+pr>>2;
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+paq9a.cpp:645:43: note: place parentheses around the '+' expression to silence this warning
+  645 |   pr=a1.pp(2048, pr*2, h2*256+pc&0xffff)*3+pr>>2;
+      |                                           ^
+      |      (                                       )
+paq9a.cpp:646:48: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  646 |   pr=a2.pp(2048, pr*2, h1*(11<<6)+pc&0x3ffff)*3+pr>>2;
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+paq9a.cpp:646:48: note: place parentheses around the '+' expression to silence this warning
+  646 |   pr=a2.pp(2048, pr*2, h1*(11<<6)+pc&0x3ffff)*3+pr>>2;
+      |                                                ^
+      |      (                                            )
+paq9a.cpp:647:47: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  647 |   pr=a3.pp(2048, pr*2, h1*(7<<4)+pc&0xfffff)*3+pr>>2;
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+paq9a.cpp:647:47: note: place parentheses around the '+' expression to silence this warning
+  647 |   pr=a3.pp(2048, pr*2, h1*(7<<4)+pc&0xfffff)*3+pr>>2;
+      |                                               ^
+      |      (                                           )
+paq9a.cpp:759:13: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  759 |     int r=pc+256>>8-bcount==c0;  // c0 consistent with mispredicted byte?
+      |           ~~^~~~~~
+paq9a.cpp:759:13: note: place parentheses around the '+' expression to silence this warning
+  759 |     int r=pc+256>>8-bcount==c0;  // c0 consistent with mispredicted byte?
+      |             ^
+      |           (     )
+paq9a.cpp:759:20: warning: operator '>>' has lower precedence than '-'; '-' will be evaluated first
+      [-Wshift-op-parentheses]
+  759 |     int r=pc+256>>8-bcount==c0;  // c0 consistent with mispredicted byte?
+      |                 ~~~^~~~~~~
+paq9a.cpp:759:20: note: place parentheses around the '-' expression to silence this warning
+  759 |     int r=pc+256>>8-bcount==c0;  // c0 consistent with mispredicted byte?
+      |                    ^
+      |                   (       )
+paq9a.cpp:787:53: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  787 |       pr=m[i-1].pp(pr, stretch(sm[i].p(st)), st+r)*3+pr>>2;
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+paq9a.cpp:787:53: note: place parentheses around the '+' expression to silence this warning
+  787 |       pr=m[i-1].pp(pr, stretch(sm[i].p(st)), st+r)*3+pr>>2;
+      |                                                     ^
+      |          (                                             )
+paq9a.cpp:789:44: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  789 |     pr=a1.pp(512, pr*2, c0+pc*256&0xffff)*3+pr>>2;  // Adjust prediction
+      |        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+paq9a.cpp:789:44: note: place parentheses around the '+' expression to silence this warning
+  789 |     pr=a1.pp(512, pr*2, c0+pc*256&0xffff)*3+pr>>2;  // Adjust prediction
+      |                                            ^
+      |        (                                      )
+paq9a.cpp:790:43: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  790 |     pr=a2.pp(512, pr*2, c4<<8&0xff00|c0)*3+pr>>2;
+      |        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+paq9a.cpp:790:43: note: place parentheses around the '+' expression to silence this warning
+  790 |     pr=a2.pp(512, pr*2, c4<<8&0xff00|c0)*3+pr>>2;
+      |                                           ^
+      |        (                                     )
+paq9a.cpp:791:42: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first
+      [-Wshift-op-parentheses]
+  791 |     pr=a3.pp(512, pr*2, c4*3+c0&0xffff)*3+pr>>2;
+      |        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+paq9a.cpp:791:42: note: place parentheses around the '+' expression to silence this warning
+  791 |     pr=a3.pp(512, pr*2, c4*3+c0&0xffff)*3+pr>>2;
+      |                                          ^
+      |        (                                    )
+paq9a.cpp:848:22: warning: operator '>>' has lower precedence than '-'; '-' will be evaluated first
+      [-Wshift-op-parentheses]
+  848 |     U32 xmid=x1 + (x2-x1>>12)*p + ((x2-x1&0xfff)*p>>12);
+      |                    ~~^~~~~
+paq9a.cpp:848:22: note: place parentheses around the '-' expression to silence this warning
+  848 |     U32 xmid=x1 + (x2-x1>>12)*p + ((x2-x1&0xfff)*p>>12);
+      |                      ^
+      |                    (    )
+paq9a.cpp:1107:16: warning: operator '<<' has lower precedence than '-'; '-' will be evaluated first
+      [-Wshift-op-parentheses]
+ 1107 |   MEM=1<<22+MEM-'0';
+      |        ~~~~~~~~^~~~
+paq9a.cpp:1107:16: note: place parentheses around the '-' expression to silence this warning
+ 1107 |   MEM=1<<22+MEM-'0';
+      |                ^
+      |          (         )
+paq9a.cpp:1191:27: warning: operator '<<' has lower precedence than '-'; '-' will be evaluated first
+      [-Wshift-op-parentheses]
+ 1191 |       MEM=1<<22+argv[3][1]-'0';
+      |            ~~~~~~~~~~~~~~~^~~~
+paq9a.cpp:1191:27: note: place parentheses around the '-' expression to silence this warning
+ 1191 |       MEM=1<<22+argv[3][1]-'0';
+      |                           ^
+      |              (                )
+14 warnings generated.
+noobcod3r-rtx@noobcod3r-rtx ~/D/G/C/p/src (main)> time ./paq9a a enwik9.paq9a "/home/noobcod3r-rtx/Documents/GitHub/CUDA-thesis-study/enwik9.txt"
+/home/noobcod3r-rtx/Documents/GitHub/CUDA-thesis-study/enwik9.txt      1000000000 ->       169937187
+-> 169937257 in 761.19 sec
+HashTable<16> 99.6111% full, 45.4636% utilized of 262144 KiB
+LZP hash table 99.9542% full of 65536 KiB
+LZP buffer 100.0000% full of 65536 KiB
+LZP 594116935 literals, 405883065 matches (40.5883% matched)
+Used 406005 KiB memory
+
+________________________________________________________
+Executed in  769.62 secs    fish           external
+   usr time  760.26 secs  553.00 micros  760.26 secs
+   sys time    1.24 secs  292.00 micros    1.24 secs
+
+noobcod3r-rtx@noobcod3r-rtx ~/D/G/C/p/src (main)> time ./paq9a a enwik9-9.paq9a -9 "/home/noobcod3r-rtx/Documents/GitHub/CUDA-thesis-study/enwik9.txt"
+/home/noobcod3r-rtx/Documents/GitHub/CUDA-thesis-study/enwik9.txt      1000000000 ->       165193357
+-> 165193427 in 743.11 sec
+HashTable<16> 99.5837% full, 41.2657% utilized of 1048576 KiB
+LZP hash table 95.5739% full of 262144 KiB
+LZP buffer 100.0000% full of 262144 KiB
+LZP 551256196 literals, 448743804 matches (44.8744% matched)
+Used 1585653 KiB memory
+
+________________________________________________________
+Executed in  752.24 secs    fish           external
+   usr time  742.84 secs    0.00 micros  742.84 secs
+   sys time    1.49 secs  857.00 micros    1.49 secs
+
+noobcod3r-rtx@noobcod3r-rtx ~/D/G/C/p/src (main)> time ./paq9a x enwik9.paq9a enwik9.txt        (base)
+
+/home/noobcod3r-rtx/Documents/GitHub/CUDA-thesis-study/enwik9.txt -> enwik9.txt   405877 KiB
+750.19 sec
+HashTable<16> 99.6111% full, 45.4636% utilized of 262144 KiB
+LZP hash table 99.9542% full of 65536 KiB
+LZP buffer 100.0000% full of 65536 KiB
+LZP 594116935 literals, 405883065 matches (40.5883% matched)
+Used 405877 KiB memory
+
+________________________________________________________
+Executed in  757.11 secs    fish           external
+   usr time  747.96 secs    0.00 micros  747.96 secs
+   sys time    2.54 secs  891.00 micros    2.54 secs
+
+noobcod3r-rtx@noobcod3r-rtx ~/D/G/C/p/src (main)> time ./paq9a x enwik9-9.paq9a enwik9-9.txt    (base)
+
+/home/noobcod3r-rtx/Documents/GitHub/CUDA-thesis-study/enwik9.txt -> enwik9-9.txt  1585525 KiB
+716.97 sec
+HashTable<16> 99.5837% full, 41.2657% utilized of 1048576 KiB
+LZP hash table 95.5739% full of 262144 KiB
+LZP buffer 100.0000% full of 262144 KiB
+LZP 551256196 literals, 448743804 matches (44.8744% matched)
+Used 1585525 KiB memory
+
+________________________________________________________
+Executed in  726.02 secs    fish           external
+   usr time  715.04 secs    0.00 millis  715.04 secs
+   sys time    3.11 secs    1.48 millis    3.11 secs
+
+noobcod3r-rtx@noobcod3r-rtx ~/D/G/C/p/src (main)>
