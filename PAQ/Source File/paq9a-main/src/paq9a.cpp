@@ -30,6 +30,8 @@ during extraction.  Files are never clobbered.
 
 The "a" command creates a new archive and adds the named files.
 Wildcards are permitted if compiled with g++.  Options
+
+
 and filenames may be in any order.  Options apply only to filenames
 after the option, and override previous options.  Options are:
 
