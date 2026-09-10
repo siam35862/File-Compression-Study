@@ -26,4 +26,4 @@ def compare_files(file1, file2):
         print(f"\nSize difference: {abs(len(data1) - len(data2))} bytes")
 
 
-compare_files("siam", "mbfile")
+compare_files("enwik9_s", "enwik9")

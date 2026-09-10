@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <cuda_runtime.h>
+#include<chrono>
 #include <cstring> // For strlen
 
 #define COMPRESS 0   // Compression mode
@@ -222,12 +223,12 @@ void compress(char *destination_file, char *source_file)
     int blocks =
         (num_of_chunks + threads - 1) / threads;
 
-    paq9_cuda<<<blocks, threads>>>(
-        d_input_size,
-        d_input,
-        d_output_size,
-        d_output,
-        num_of_chunks, mode, memory_level);
+    // paq9_cuda<<<blocks, threads>>>(
+    //     d_input_size,
+    //     d_input,
+    //     d_output_size,
+    //     d_output,
+    //     num_of_chunks, mode, memory_level);
 
     cudaDeviceSynchronize();
 
@@ -290,15 +291,15 @@ void compress(char *destination_file, char *source_file)
         size_t current_size =
             min(chunk_size, total_size - i * chunk_size);
 
-        dest.write(output[i], output_size[i]);
-        std::cout << input_size[i] << " " << output_size[i] << std::endl;
+        dest.write(src_file[i], input_size[i]);
+        //std::cout << input_size[i] << " " << output_size[i] << std::endl;
     }
     dest.close();
 }
 
 int main(int argc, char **args)
 {
-    clock_t start = clock();
+    auto start = std::chrono::steady_clock::now();
     std::cout << "CUDA version of PAQ9 started successfully.\n\n";
     if (argc < 3)
     {
@@ -419,5 +420,15 @@ int main(int argc, char **args)
         }
     }
 
-    std::cout << "Successfuly finished with exit code 0\n";
+    cudaDeviceSynchronize(); // GPU কাজ শেষ হওয়া নিশ্চিত
+
+    auto end = std::chrono::steady_clock::now();
+
+    double seconds =
+        std::chrono::duration<double>(end - start).count();
+
+    std::cout << "Total wall time: "
+              << seconds << " seconds\n";
+
+    return 0;
 }
