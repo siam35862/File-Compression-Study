@@ -6,23 +6,76 @@
 #include <cuda_runtime.h>
 #include <cstring> // For strlen
 
-using namespace std;
-
 #define COMPRESS 0   // Compression mode
 #define DECOMPRESS 1 // Decompression mode
 int mode;
 int memory_level = 7;      // default memory level
 int memory_chunk_size = 1; // default memory chunks
 
+template <class T>
+__device__ void alloc(T *&p, int allocate_size, int &total_allocated_size)
+{
+    p = new (std::nothrow) T[allocate_size]();
+    if (!p)
+    {
+        printf("Error: Out of memory (failed to allocate %d elements)\n", allocate_size * sizeof(T));
+        exit(1);
+    }
+    total_allocated_size += allocate_size * sizeof(T);
+}
+
+// 8, 16, 32 bit unsigned types (adjust as appropriate)
+typedef unsigned char U8;
+typedef unsigned short U16;
+typedef unsigned int U32;
+
+///////////////////////////// Squash //////////////////////////////
+
+// return p = 1/(1 + exp(-d)), d scaled by 8 bits, p scaled by 12 bits
+class Squash
+{
+    short tab[4096];
+
+public:
+    __device__ Squash();
+    __device__ int operator()(int d);
+};
+
+// intialize the method of Squash
+__device__ Squash::Squash()
+{
+    static const int t[33] = {
+        1, 2, 3, 6, 10, 16, 27, 45, 73, 120, 194, 310, 488, 747, 1101,
+        1546, 2047, 2549, 2994, 3348, 3607, 3785, 3901, 3975, 4022,
+        4050, 4068, 4079, 4085, 4089, 4092, 4093, 4094};
+    for (int i = -2048; i < 2048; ++i)
+    {
+        int w = i & 127;
+        int d = (i >> 7) + 16;
+        tab[i + 2048] = (t[d] * (128 - w) + t[(d + 1)] * w + 64) >> 7;
+    }
+}
+__device__ int Squash::operator()(int d)
+{
+    d += 2048;
+    if (d < 0)
+        return 0;
+    else if (d > 4095)
+        return 4095;
+    else
+        return tab[d];
+}
+
 __global__ void paq9_cuda(
     int *input_size,
     char **input,
     int *output_size,
     char **output,
-    int num_of_chunks,int mode,int memory_level)
+    int num_of_chunks, int mode, int memory_level)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if(mode==COMPRESS);
+    if (mode == COMPRESS)
+        ;
     if (i >= num_of_chunks)
         return;
 
@@ -40,13 +93,13 @@ void compress(char *destination_file, char *source_file)
     constexpr size_t MB = 1024 * 1024;
     size_t chunk_size = memory_chunk_size * MB;
 
-    ifstream source(source_file, ios::binary);
+    std::ifstream source(source_file, std::ios::binary);
     if (!source)
     {
-        cerr << "Cannot open " << source_file << endl;
+        std::cerr << "Cannot open " << source_file << std::endl;
         exit(1);
     }
-    source.seekg(0, ios::end);
+    source.seekg(0, std::ios::end);
     size_t total_size = source.tellg();
 
     size_t num_of_chunks =
@@ -54,9 +107,9 @@ void compress(char *destination_file, char *source_file)
 
     char **src_file = new char *[num_of_chunks];
     source.clear();
-    source.seekg(0, ios::beg);
+    source.seekg(0, std::ios::beg);
 
-    vector<int> input_size(num_of_chunks);
+    std::vector<int> input_size(num_of_chunks);
 
     for (size_t i = 0; i < num_of_chunks; i++)
     {
@@ -174,7 +227,7 @@ void compress(char *destination_file, char *source_file)
         d_input,
         d_output_size,
         d_output,
-        num_of_chunks,mode,memory_level);
+        num_of_chunks, mode, memory_level);
 
     cudaDeviceSynchronize();
 
@@ -230,9 +283,7 @@ void compress(char *destination_file, char *source_file)
     delete[] temp_d_input;
     delete[] temp_d_output;
 
-   
-
-    ofstream dest(destination_file, ios::binary);
+    std::ofstream dest(destination_file, std::ios::binary);
 
     for (size_t i = 0; i < num_of_chunks; i++)
     {
@@ -240,7 +291,7 @@ void compress(char *destination_file, char *source_file)
             min(chunk_size, total_size - i * chunk_size);
 
         dest.write(output[i], output_size[i]);
-        cout << input_size[i] << " " << output_size[i] << endl;
+        std::cout << input_size[i] << " " << output_size[i] << std::endl;
     }
     dest.close();
 }
@@ -248,10 +299,10 @@ void compress(char *destination_file, char *source_file)
 int main(int argc, char **args)
 {
     clock_t start = clock();
-    cout << "CUDA version of PAQ9 started successfully.\n\n";
+    std::cout << "CUDA version of PAQ9 started successfully.\n\n";
     if (argc < 3)
     {
-        cout << "Run again and provide proper arguments.\n";
+        std::cout << "Run again and provide proper arguments.\n";
         exit(1);
     }
 
@@ -265,13 +316,13 @@ int main(int argc, char **args)
             mode = DECOMPRESS;
         else
         {
-            cout << "Run again and provide arguments in correct way.\n";
+            std::cout << "Run again and provide arguments in correct way.\n";
             exit(1);
         }
     }
     else
     {
-        cout << "Run again and provide arguments in correct way.\n";
+        std::cout << "Run again and provide arguments in correct way.\n";
         exit(1);
     }
     int ind = 2;
@@ -279,7 +330,7 @@ int main(int argc, char **args)
     {
         if (args[ind][0] == '-')
         {
-            string temp;
+            std::string temp;
 
             int len = strlen(args[ind]);
             for (int i = 1; i < len; i++)
@@ -288,7 +339,7 @@ int main(int argc, char **args)
                     temp += args[ind][i];
                 else
                 {
-                    cout << "Run again and provide arguments in correct way.\n";
+                    std::cout << "Run again and provide arguments in correct way.\n";
                     exit(1);
                 }
             }
@@ -303,13 +354,13 @@ int main(int argc, char **args)
         }
         else
         {
-            cout << "Run again and provide arguments in correct way.\n";
+            std::cout << "Run again and provide arguments in correct way.\n";
             exit(1);
         }
 
         if (ind < argc && args[ind][0] == '-')
         {
-            string temp;
+            std::string temp;
 
             int len = strlen(args[ind]);
             for (int i = 1; i < len; i++)
@@ -318,7 +369,7 @@ int main(int argc, char **args)
                     temp += args[ind][i];
                 else
                 {
-                    cout << "Run again and provide arguments in correct way.\n";
+                    std::cout << "Run again and provide arguments in correct way.\n";
                     exit(1);
                 }
             }
@@ -327,7 +378,7 @@ int main(int argc, char **args)
         }
         else if (ind >= argc)
         {
-            cout << "Run again and provide arguments in correct way.\n";
+            std::cout << "Run again and provide arguments in correct way.\n";
             exit(1);
         }
 
@@ -338,7 +389,7 @@ int main(int argc, char **args)
         }
         else
         {
-            cout << "Run again and provide arguments in correct way.\n";
+            std::cout << "Run again and provide arguments in correct way.\n";
             exit(1);
         }
 
@@ -353,7 +404,7 @@ int main(int argc, char **args)
         }
         else
         {
-            cout << "Run again and provide arguments in correct way.\n";
+            std::cout << "Run again and provide arguments in correct way.\n";
             exit(1);
         }
         if (ind < argc)
@@ -363,10 +414,10 @@ int main(int argc, char **args)
         }
         else
         {
-            cout << "Run again and provide arguments in correct way.\n";
+            std::cout << "Run again and provide arguments in correct way.\n";
             exit(1);
         }
     }
 
-    cout << "Successfuly finished with exit code 0\n";
+    std::cout << "Successfuly finished with exit code 0\n";
 }
