@@ -648,7 +648,7 @@ __device__ HashTable<B>::~HashTable()
 
 ////////////////////////// LZP /////////////////////////
 
-__device__ U32 MEM = 1 << 22; // Global memory limit, 1 << 22+(memory option)
+__device__ U32 MEM = 1 << 22+1; // Global memory limit, 1 << 22+(memory option)
 __device__ inline bool isalpha_device(char ch)
 {
     return (ch >= 'A' && ch <= 'Z') ||
@@ -868,7 +868,8 @@ __device__ void Predictor::update(int y)
             mix[i - 1].update(y);
         }
         c0 += c0 + y;
-        if (++bcount == 8)
+        bcount++;
+        if (bcount == 8)
             bcount = c0 = 0;
         if ((nibble += nibble + y) >= 16)
             nibble = 1;
@@ -1003,9 +1004,10 @@ public:
 };
 
 // Create in mode m (COMPRESS or DECOMPRESS) with f opened as the archive.
-__device__ Encoder::Encoder(int m, char *temp, int tsz, int itr) : mode(m), inout(temp), total_size(tsz), iterator_size(itr), x1(0), x2(0xffffffff), x(0),
+__device__ Encoder::Encoder(int m, char *temp, int tsz, int itr) : mode(m), inout(temp), total_size(tsz), iterator_size(itr), x1(0), x2(0xffffffff), x(0), buf(0),
                                                                    usize(0), csize(0), usum(0), csum(0)
 {
+    buf=0;
     if (mode == DECOMPRESS)
     { // x = first 4 bytes of archive
         for (int i = 0; i < 4; ++i)
@@ -1065,7 +1067,7 @@ __device__ int get4(int &itr, const char *in)
 
 __global__ void init()
 {
-    // blockDim.x == 0 বাদ দেওয়া হয়েছে
+    // blockDim.x == 0 বাদ দেওয়া হয়েছে
     if (blockIdx.x == 0 && threadIdx.x == 0)
     {
         squash = new Squash();
@@ -1106,7 +1108,7 @@ paq9_cuda(
         itr = 0;
         while (itr < input_size[i])
         {
-            ch = input[i][itr];
+            ch = (unsigned char)input[i][itr];
             itr++;
 
             int cp = lzp->predict_char();
@@ -1312,7 +1314,7 @@ void compress(char *destination_file, char *source_file)
 
     ////////////////////paq9_cuda call////////////////////////////
     int mode = COMPRESS;
-    paq9_cuda<<<1, 1>>>(
+    paq9_cuda<<<blocks, threads>>>(
         d_input_size,
         d_input,
         d_output_size,
@@ -1380,6 +1382,10 @@ void compress(char *destination_file, char *source_file)
     delete[] temp_d_output;
 
     std::ofstream dest(destination_file, std::ios::binary);
+    dest.write("pQ9",3);
+    dest.put(1);
+    dest.write("1",1);
+    dest.write(source_file,strlen(source_file));
 
     for (size_t i = 0; i < num_of_chunks; i++)
     {
@@ -1516,7 +1522,7 @@ int main(int argc, char **args)
         }
     }
 
-    cudaDeviceSynchronize(); // GPU কাজ শেষ হওয়া নিশ্চিত
+    cudaDeviceSynchronize(); // GPU কাজ শেষ হওয়া নিশ্চিত
 
     auto end = std::chrono::steady_clock::now();
 

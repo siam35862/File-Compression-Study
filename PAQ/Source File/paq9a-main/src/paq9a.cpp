@@ -776,7 +776,7 @@ HashTable<B>::HashTable(int n) : t(0), N(n)
   assert(B >= 2 && (B & B - 1) == 0);
   assert(N >= B * 4 && (N & N - 1) == 0);
   alloc(t, N + B * 4 + 64);
-  t += 64 - int(((long)t) & 63); // align on cache line boundary
+  t += 64 - int(((long long)t) & 63); // align on cache line boundary
 }
 
 template <int B>
