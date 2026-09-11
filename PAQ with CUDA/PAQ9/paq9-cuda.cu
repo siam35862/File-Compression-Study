@@ -8,10 +8,15 @@
 #include <cstring> // For strlen
 #include <assert.h>
 
+#define MAX_THREADS 1024
 int memory_level = 7;      // default memory level
-int memory_chunk_size = 8; // default memory chunks
+int memory_chunk_size = 16; // default memory chunks
 #define COMPRESS 0
 #define DECOMPRESS 1
+
+__device__ int get_tid() {
+    return blockIdx.x * blockDim.x + threadIdx.x;
+}
 
 class Alloc
 {
@@ -36,7 +41,7 @@ public:
     }
 };
 
-__device__ Alloc *allocator;
+__device__ Alloc *allocator[MAX_THREADS];
 
 // 8, 16, 32 bit unsigned types (adjust as appropriate)
 typedef unsigned char U8;
@@ -139,7 +144,7 @@ public:
 
 __device__ Ilog::Ilog()
 {
-    allocator->alloc(t, 65536);
+    allocator[get_tid()]->alloc(t, 65536);
     U32 x = 14155776;
     for (int i = 2; i < 65536; ++i)
     {
@@ -458,6 +463,7 @@ protected:
 
 public:
     __device__ StateMap(int n = 256);
+    __device__ ~StateMap(); // frees prediction_table
 
     // update bit y (0..1)
     __device__ void update(int y, int limit = 255);
@@ -472,12 +478,18 @@ public:
 __device__ StateMap::StateMap(int n) : N(n), cntxt(0)
 {
 
-    allocator->alloc(prediction_table, N);
+    allocator[get_tid()]->alloc(prediction_table, N);
     for (int i = 0; i < N; i++)
         prediction_table[i] = 2147483648U; // 1<<31
     if (StateMap_dt[0] == 0)
         for (int i = 0; i < 1024; i++)
             StateMap_dt[i] = 16384 / (i + i + 3);
+}
+
+__device__ StateMap::~StateMap()
+{
+    delete[] prediction_table;
+    prediction_table = 0;
 }
 
 __device__ void StateMap::update(int y, int limit)
@@ -522,6 +534,7 @@ protected:
 
 public:
     __device__ Mix(int n = 512);
+    __device__ ~Mix(); // frees wt (APM inherits this destructor)
     __device__ int prediction(int p1, int p2, int cntxt);
     __device__ void update(int y);
 };
@@ -529,9 +542,15 @@ public:
 
 __device__ Mix::Mix(int n) : N(n), x1(0), x2(0), context(0), last_prediction(0)
 {
-    allocator->alloc(wt, n * 2);
+    allocator[get_tid()]->alloc(wt, n * 2);
     for (int i = 0; i < N * 2; i++)
         wt[i] = 1 << 23;
+}
+
+__device__ Mix::~Mix()
+{
+    delete[] wt;
+    wt = 0;
 }
 
 __device__ int Mix::prediction(int p1, int p2, int cntxt)
@@ -587,8 +606,9 @@ __device__ APM::APM(int n) : Mix(n)
 template <int B>
 class HashTable
 {
-    U8 *table;   // table: 1 element= B bytes: checksuj priority data
-    const U32 N; // size in bytes
+    U8 *table;     // table: 1 element= B bytes: checksuj priority data
+    U8 *raw_table; // true address returned by alloc(), before cache-line alignment
+    const U32 N;   // size in bytes
 
 public:
     HashTable(int n);
@@ -597,11 +617,12 @@ public:
 };
 
 template <int B>
-__device__ HashTable<B>::HashTable(int n) : table(0), N(n)
+__device__ HashTable<B>::HashTable(int n) : table(0), raw_table(0), N(n)
 {
     assert(B >= 2 && (B & B - 1) == 0);
     assert(N >= B * 4 && (N & N - 1) == 0);
-    allocator->alloc(table, N + B * 4 + 64);
+    allocator[get_tid()]->alloc(table, N + B * 4 + 64);
+    raw_table = table;                     // remember true allocation address
     table += 64 - int(((long)table) & 63); // align on cache line boundary
 }
 
@@ -644,11 +665,13 @@ __device__ HashTable<B>::~HashTable()
     }
     printf("HashTable<%d> %1.4f%% full, %1.4f%% utilized of %d KiB\n",
            B, 100.0 * c0 * B / N, 100.0 * c / N, N >> 10);
+    delete[] raw_table; // must delete the original pointer, not the aligned one
+    raw_table = table = 0;
 }
 
 ////////////////////////// LZP /////////////////////////
 
-__device__ U32 MEM = 1 << 22; // Global memory limit, 1 << 22+(memory option)
+__device__ U32 MEM = 1 << 22 + 1; // Global memory limit, 1 << 22+(memory option)
 __device__ inline bool isalpha_device(char ch)
 {
     return (ch >= 'A' && ch <= 'Z') ||
@@ -716,8 +739,8 @@ __device__ LZP::LZP() : N(MEM / 8), H(MEM / 32),
 {
     assert(MEM > 0);
     assert(H > 0);
-    allocator->alloc(buf, N);
-    allocator->alloc(table, H);
+    allocator[get_tid()]->alloc(table, H);
+    allocator[get_tid()]->alloc(buf, N);
 }
 
 // Print statistics
@@ -732,6 +755,12 @@ __device__ LZP::~LZP()
     printf("LZP %d literals, %d matches (%1.4f%% matched)\n",
            literals, matches,
            literals + matches > 0 ? 100.0 * matches / (literals + matches) : 0.0);
+    delete[] table;
+    delete[] buf;
+    table = 0;
+    buf = 0;
+    // statemap1 and apm1/apm2/apm3 are member objects, not pointers:
+    // their own destructors run automatically and free their internals.
 }
 
 // Predicted next byte, or -1 for no prediction
@@ -806,7 +835,7 @@ __device__ void LZP::update(int ch)
     table[hash] = pos;
 }
 
-__device__ LZP *lzp;
+__device__ LZP *lzp[MAX_THREADS];
 
 //////////////////////////// Predictor /////////////////////////
 
@@ -835,6 +864,7 @@ class Predictor
 
 public:
     __device__ Predictor();
+    __device__ ~Predictor(); // frees context1; member destructors free hashtable/statemap/mix/apm
     __device__ int predict_next_bit();
     __device__ void update(int y);
 };
@@ -843,9 +873,18 @@ public:
 __device__ Predictor::Predictor() : c0(0), nibble(1), bcount(0), hashtable(MEM / 2),
                                     apm1(0x10000), apm2(0x10000), apm3(0x10000)
 {
-    allocator->alloc(context1, 0x40000);
+    allocator[get_tid()]->alloc(context1, 0x40000);
     for (int i = 0; i < N; ++i)
         sp[i] = cp[i] = context1;
+}
+
+// hashtable, statemap[N], mix[N-1] and apm1/apm2/apm3 free themselves via
+// their own destructors when this object is destroyed; only context1
+// (allocated directly by Predictor) needs freeing here.
+__device__ Predictor::~Predictor()
+{
+    delete[] context1;
+    context1 = 0;
 }
 
 // Update model
@@ -868,7 +907,8 @@ __device__ void Predictor::update(int y)
             mix[i - 1].update(y);
         }
         c0 += c0 + y;
-        if (++bcount == 8)
+        bcount++;
+        if (bcount == 8)
             bcount = c0 = 0;
         if ((nibble += nibble + y) >= 16)
             nibble = 1;
@@ -881,17 +921,18 @@ __device__ void Predictor::update(int y)
 // Predict next bit
 __device__ int Predictor::predict_next_bit()
 {
+    int tid=get_tid();
     assert(lzp);
     if (c0 == 0)
-        return lzp->probability();
+        return lzp[tid]->probability();
     else
     {
 
         // Set context pointers
-        int pc = lzp->predict_char();         // mispredicted byte
+        int pc = lzp[tid]->predict_char();         // mispredicted byte
         int r = pc + 256 >> 8 - bcount == c0; // c0 consistent with mispredicted byte?
-        U32 c4 = lzp->context4();             // last 4 whole context bytes, shifted into LSB
-        U32 c8 = (lzp->context8() << 4) - 1;  // hash of last 7 bytes with 4 trailing 1 bits
+        U32 c4 = lzp[tid]->context4();             // last 4 whole context bytes, shifted into LSB
+        U32 c8 = (lzp[tid]->context8() << 4) - 1;  // hash of last 7 bytes with 4 trailing 1 bits
         if ((bcount & 3) == 0)
         { // nibble boundary?  Update context pointers
             pc &= -r;
@@ -908,8 +949,8 @@ __device__ int Predictor::predict_next_bit()
             cp[6] = hashtable[c4 * 7 + c0];
             cp[7] = hashtable[(c8 * 5 & 0xfffffc) + c0];
             cp[8] = hashtable[(c8 * 11 & 0xffffff0) + c0 + pc * 13];
-            cp[9] = hashtable[lzp->word0 * 5 + c0 + pc * 17];
-            cp[10] = hashtable[lzp->word1 * 7 + lzp->word0 * 11 + c0 + pc * 37];
+            cp[9] = hashtable[lzp[tid]->word0 * 5 + c0 + pc * 17];
+            cp[10] = hashtable[lzp[tid]->word1 * 7 + lzp[tid]->word0 * 11 + c0 + pc * 37];
         }
 
         // Mix predictions
@@ -929,7 +970,7 @@ __device__ int Predictor::predict_next_bit()
     }
 }
 
-__device__ Predictor *predictor;
+__device__ Predictor *predictor[MAX_THREADS];
 
 //////////////////////////// Encoder ////////////////////////////
 
@@ -964,14 +1005,16 @@ private:
 public:
     int iterator_size;
     __device__ Encoder(int m, char *temp, int tsz, int itr);
+    __device__ ~Encoder(); // frees buf (COMPRESS mode only; inout is not owned by Encoder)
     __device__ void flush(); // call this when compression is finished
     __device__ void put4(U32 c);
 
     // Compress bit y or return decompressed bit
     __device__ int code(int y = 0)
     {
+        int tid=get_tid();
         assert(predictor);
-        int p = predictor->predict_next_bit();
+        int p = predictor[tid]->predict_next_bit();
         assert(p >= 0 && p < 4096);
         p += p < 2048;
         U32 xmid = x1 + (x2 - x1 >> 12) * p + ((x2 - x1 & 0xfff) * p >> 12);
@@ -979,7 +1022,7 @@ public:
         if (mode == DECOMPRESS)
             y = x <= xmid;
         y ? (x2 = xmid) : (x1 = xmid + 1);
-        predictor->update(y);
+        predictor[tid]->update(y);
         while (((x1 ^ x2) & 0xff000000) == 0)
         { // pass equal leading bytes of range
             if (mode == COMPRESS)
@@ -1006,6 +1049,8 @@ public:
 __device__ Encoder::Encoder(int m, char *temp, int tsz, int itr) : mode(m), inout(temp), total_size(tsz), iterator_size(itr), x1(0), x2(0xffffffff), x(0),
                                                                    usize(0), csize(0), usum(0), csum(0)
 {
+    int tid = get_tid();
+    buf=0;
     if (mode == DECOMPRESS)
     { // x = first 4 bytes of archive
         for (int i = 0; i < 4; ++i)
@@ -1013,7 +1058,17 @@ __device__ Encoder::Encoder(int m, char *temp, int tsz, int itr) : mode(m), inou
         csize = 4;
     }
     else if (!buf)
-        allocator->alloc(buf, BUFSIZE);
+        allocator[tid]->alloc(buf, BUFSIZE);
+}
+
+__device__ Encoder::~Encoder()
+{
+    if (mode == COMPRESS && buf)
+    {
+        delete[] buf;
+        buf = 0;
+    }
+    // inout is owned by the caller (points into the chunk's device buffer) - never freed here.
 }
 
 // write 4 byte in inout
@@ -1065,13 +1120,15 @@ __device__ int get4(int &itr, const char *in)
 
 __global__ void init()
 {
-    // blockDim.x == 0 বাদ দেওয়া হয়েছে
+    // blockDim.x == 0 বাদ দেওয়া হয়েছে
     if (blockIdx.x == 0 && threadIdx.x == 0)
     {
         squash = new Squash();
         stretch = new Stretch();
-        allocator = new Alloc();
+        allocator[get_tid()] = new Alloc();
         ilog = new Ilog();
+
+        delete allocator[get_tid()];
     }
 }
 
@@ -1083,57 +1140,57 @@ paq9_cuda(
     char **output,
     int num_of_chunks, int mode, int memory_level)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid=get_tid();
 
-    if (i >= num_of_chunks)
+    if (tid >= num_of_chunks)
         return;
-    output_size[i] = 100;
+    output_size[tid] = 100;
 
-    
-    allocator = new Alloc();
-    predictor = new Predictor();
-    lzp = new LZP();
+    allocator[tid] = new Alloc();
+    predictor[tid] = new Predictor();
+    lzp[tid] = new LZP();
 
     // printf("%8d KiB\b\b\b\b\b\b\b\b\b\b\b\b", allocated >> 10);
 
     // // COmpress
     if (mode == 0)
     {
-       
+
         int itr = 0;
-        Encoder encoder(mode, output[i], input_size[i], itr);
+        Encoder encoder(mode, output[tid], input_size[tid], itr);
         int ch;
         itr = 0;
-        while (itr < input_size[i])
+        while (itr < input_size[tid])
         {
-            ch = input[i][itr];
+            ch = (unsigned char)input[tid][itr];
             itr++;
 
-            int cp = lzp->predict_char();
+            int cp = lzp[tid]->predict_char();
             if (ch == cp)
                 encoder.code(1);
             else
                 for (int i = 8; i >= 0; --i)
                     encoder.code(ch >> i & 1);
             encoder.count();
-            lzp->update(ch);
+            lzp[tid]->update(ch);
         }
         encoder.flush();
-        output_size[i] = encoder.iterator_size;
+        output_size[tid] = encoder.iterator_size;
     }
     else
     {
         // decompress
         int itr = 0;
         int itr2 = 0;
-        int usize = get4(itr, input[i]);
-        get4(itr, input[i]); // csize
+        int usize = input_size[tid];
+        // get4(itr, input[tid]);
+        // get4(itr, input[tid]); // csize
 
-        Encoder encoder(mode, input[i], input_size[i], itr);
+        Encoder encoder(mode, input[tid], input_size[tid], itr);
 
         while (usize--)
         {
-            int cp = lzp->predict_char();
+            int cp = lzp[tid]->predict_char();
             if (encoder.code() == 0)
             {
                 cp = 1;
@@ -1141,18 +1198,24 @@ paq9_cuda(
                     cp += cp + encoder.code();
                 cp &= 255;
             }
-            output[i][itr2++] = cp;
-            lzp->update(cp);
+            output[tid][itr2++] = cp;
+            lzp[tid]->update(cp);
         }
-        output_size[i] = itr2;
+        output_size[tid] = itr2;
     }
 
-    // just store
-    //  output_size[i] = input_size[i];
-    //  for (int j = 0; j < input_size[i]; i++)
-    //  {
-    //      output[i][j] = input[i][j];
-    //  }
+    // Free this thread's dynamically-allocated objects now that its chunk
+    // is done, so the device heap (cudaLimitMallocHeapSize) is returned for
+    // reuse by other blocks instead of staying held for the whole kernel.
+    // deleting predictor[tid] and lzp[tid] cascades: their member objects
+    // (StateMap, Mix, APM, HashTable) each free their own internal arrays
+    // via the destructors added above.
+    delete predictor[tid];
+    delete lzp[tid];
+    delete allocator[tid];
+    predictor[tid] = 0;
+    lzp[tid] = 0;
+    allocator[tid] = 0;
 }
 
 void compress(char *destination_file, char *source_file)
@@ -1191,7 +1254,12 @@ void compress(char *destination_file, char *source_file)
     }
     source.close();
 
-    // std::cout << num_of_chunks << std::endl;
+
+
+     std::cout<<"Number of Chunks" << num_of_chunks << std::endl;
+     std::cout<<"Total Size "<<1.0*total_size/MB<<" MB "<<std::endl;
+     std::cout<<"Chunk Size "<<(1.0*total_size/MB)/num_of_chunks<<" MB "<<std::endl;
+
 
     // preparing for calling device function
 
@@ -1294,9 +1362,19 @@ void compress(char *destination_file, char *source_file)
     // std::cout << blocks << " " << threads << std::endl;
 
     // initialize the gpu classes
-    //Heap Resize
-    size_t heapSize = 2048 * 1024 * 1024; // 512 MB
+    // Heap Resize
+    size_t heapSize = 4095* 1024 * 1024; // 512 MB
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
+
+    cudaError_t err1 = cudaGetLastError();
+    if (err1 != cudaSuccess)
+        std::cerr << "Heap Launch error: "
+                  << cudaGetErrorString(err1) << '\n';
+
+    err1 = cudaDeviceSynchronize();
+    if (err1 != cudaSuccess)
+        std::cerr << "Heap Kernel error: "
+                  << cudaGetErrorString(err1) << '\n';
 
     init<<<1, 1>>>();
     cudaDeviceSynchronize();
@@ -1312,7 +1390,7 @@ void compress(char *destination_file, char *source_file)
 
     ////////////////////paq9_cuda call////////////////////////////
     int mode = COMPRESS;
-    paq9_cuda<<<1, 1>>>(
+    paq9_cuda<<<blocks, threads>>>(
         d_input_size,
         d_input,
         d_output_size,
@@ -1321,7 +1399,7 @@ void compress(char *destination_file, char *source_file)
 
     cudaDeviceSynchronize();
 
-    cudaError_t err1 = cudaGetLastError();
+    err1 = cudaGetLastError();
     if (err1 != cudaSuccess)
         std::cerr << "Launch error: "
                   << cudaGetErrorString(err1) << '\n';
@@ -1345,6 +1423,7 @@ void compress(char *destination_file, char *source_file)
 
     // FIX: Allocate memory for the array of host pointers before copying
     char **output = new char *[num_of_chunks];
+
     for (int i = 0; i < num_of_chunks; i++)
     {
         // FIX: Allocate memory for each specific chunk array before copying
@@ -1380,7 +1459,10 @@ void compress(char *destination_file, char *source_file)
     delete[] temp_d_output;
 
     std::ofstream dest(destination_file, std::ios::binary);
-
+    dest.write("pQ9", 3);
+    dest.put(1);
+    dest.write("1", 1);
+    dest.write(source_file, strlen(source_file));
     for (size_t i = 0; i < num_of_chunks; i++)
     {
         size_t current_size =
@@ -1516,7 +1598,7 @@ int main(int argc, char **args)
         }
     }
 
-    cudaDeviceSynchronize(); // GPU কাজ শেষ হওয়া নিশ্চিত
+    cudaDeviceSynchronize(); // GPU কাজ শেষ হওয়া নিশ্চিত
 
     auto end = std::chrono::steady_clock::now();
 
