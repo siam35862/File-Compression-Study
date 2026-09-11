@@ -9,12 +9,13 @@
 #include <assert.h>
 
 #define MAX_THREADS 1024
-int memory_level = 7;      // default memory level
-int memory_chunk_size = 16; // default memory chunks
+int memory_level = 7;           // default memory level
+double memory_chunk_size = 0.5; // default memory chunks
 #define COMPRESS 0
 #define DECOMPRESS 1
 
-__device__ int get_tid() {
+__device__ int get_tid()
+{
     return blockIdx.x * blockDim.x + threadIdx.x;
 }
 
@@ -663,7 +664,8 @@ __device__ HashTable<B>::~HashTable()
                 ++c0;
         }
     }
-    printf("HashTable<%d> %1.4f%% full, %1.4f%% utilized of %d KiB\n",
+
+    printf("Thread No: %d :-HashTable<%d> %1.4f%% full, %1.4f%% utilized of %d KiB\n", get_tid(),
            B, 100.0 * c0 * B / N, 100.0 * c / N, N >> 10);
     delete[] raw_table; // must delete the original pointer, not the aligned one
     raw_table = table = 0;
@@ -749,10 +751,11 @@ __device__ LZP::~LZP()
     int c = 0;
     for (int i = 0; i < H; ++i)
         c += (table[i] != 0);
-    printf("LZP hash table %1.4f%% full of %d KiB\n"
+    printf("Thread No: %d :- LZP hash table %1.4f%% full of %d KiB\t"
            "LZP buffer %1.4f%% full of %d KiB\n",
+           get_tid(),
            100.0 * c / H, H >> 8, pos < N ? 100.0 * pos / N : 100.0, N >> 10);
-    printf("LZP %d literals, %d matches (%1.4f%% matched)\n",
+    printf("Thread No: %d :- LZP %d literals, %d matches (%1.4f%% matched)\n", get_tid(),
            literals, matches,
            literals + matches > 0 ? 100.0 * matches / (literals + matches) : 0.0);
     delete[] table;
@@ -921,7 +924,7 @@ __device__ void Predictor::update(int y)
 // Predict next bit
 __device__ int Predictor::predict_next_bit()
 {
-    int tid=get_tid();
+    int tid = get_tid();
     assert(lzp);
     if (c0 == 0)
         return lzp[tid]->probability();
@@ -929,10 +932,10 @@ __device__ int Predictor::predict_next_bit()
     {
 
         // Set context pointers
-        int pc = lzp[tid]->predict_char();         // mispredicted byte
-        int r = pc + 256 >> 8 - bcount == c0; // c0 consistent with mispredicted byte?
-        U32 c4 = lzp[tid]->context4();             // last 4 whole context bytes, shifted into LSB
-        U32 c8 = (lzp[tid]->context8() << 4) - 1;  // hash of last 7 bytes with 4 trailing 1 bits
+        int pc = lzp[tid]->predict_char();        // mispredicted byte
+        int r = pc + 256 >> 8 - bcount == c0;     // c0 consistent with mispredicted byte?
+        U32 c4 = lzp[tid]->context4();            // last 4 whole context bytes, shifted into LSB
+        U32 c8 = (lzp[tid]->context8() << 4) - 1; // hash of last 7 bytes with 4 trailing 1 bits
         if ((bcount & 3) == 0)
         { // nibble boundary?  Update context pointers
             pc &= -r;
@@ -1005,14 +1008,14 @@ private:
 public:
     int iterator_size;
     __device__ Encoder(int m, char *temp, int tsz, int itr);
-    __device__ ~Encoder(); // frees buf (COMPRESS mode only; inout is not owned by Encoder)
-    __device__ void flush(); // call this when compression is finished
-    __device__ void put4(U32 c);
+    __device__ ~Encoder();   // frees buf (COMPRESS mode only; inout is not owned by Encoder)
+    __device__ bool flush(); // call this when compression is finished
+    __device__ bool put4(U32 c);
 
     // Compress bit y or return decompressed bit
     __device__ int code(int y = 0)
     {
-        int tid=get_tid();
+        int tid = get_tid();
         assert(predictor);
         int p = predictor[tid]->predict_next_bit();
         assert(p >= 0 && p < 4096);
@@ -1036,12 +1039,13 @@ public:
     }
 
     // Count one byte
-    __device__ void count()
+    __device__ bool count()
     {
         assert(mode == COMPRESS);
         ++usize;
         if (csize > BUFSIZE - 256)
-            flush();
+            return flush();
+        return true;
     }
 };
 
@@ -1050,7 +1054,7 @@ __device__ Encoder::Encoder(int m, char *temp, int tsz, int itr) : mode(m), inou
                                                                    usize(0), csize(0), usum(0), csum(0)
 {
     int tid = get_tid();
-    buf=0;
+    buf = 0;
     if (mode == DECOMPRESS)
     { // x = first 4 bytes of archive
         for (int i = 0; i < 4; ++i)
@@ -1072,19 +1076,28 @@ __device__ Encoder::~Encoder()
 }
 
 // write 4 byte in inout
-__device__ void Encoder::put4(U32 c)
+__device__ bool Encoder::put4(U32 c)
 {
+    if (iterator_size > total_size)
+        return false;
     inout[iterator_size++] = char(c >> 24);
+    if (iterator_size > total_size)
+        return false;
     inout[iterator_size++] = char(c >> 16);
+    if (iterator_size > total_size)
+        return false;
     inout[iterator_size++] = char(c >> 8);
+    if (iterator_size > total_size)
+        return false;
     inout[iterator_size++] = char(c);
+    return true;
 }
 
 // Write a compressed block and reinitialize the encoder.  The format is:
 //   uncompressed size (usize, 4 byte, MSB first)
 //   compressed size (csize, 4 bytes, MSB first)
 //   compressed data (csize bytes)
-__device__ void Encoder::flush()
+__device__ bool Encoder::flush()
 {
     if (mode == COMPRESS)
     {
@@ -1092,12 +1105,18 @@ __device__ void Encoder::flush()
         buf[csize++] = 255;
         buf[csize++] = 255;
         buf[csize++] = 255;
-        inout[iterator_size++] = 0;   // putc(0, archive);
-        inout[iterator_size++] = 'c'; // putc('c', archive);
-        put4(usize);
-        put4(csize);
+        // inout[iterator_size++] = 0;   // putc(0, archive);
+        // inout[iterator_size++] = 'c'; // putc('c', archive);
+        if (!put4(usize))
+            return false;
+        if (!put4(csize))
+            return false;
         for (int i = 0; i < csize; i++)
+        {
+            if (iterator_size > total_size)
+                return false;
             inout[iterator_size++] = buf[i];
+        }
         usum += usize;
         csum += csize + 10;
         // printf("%15.0f -> %15.0f"
@@ -1105,7 +1124,9 @@ __device__ void Encoder::flush()
         //    usum, csum);
         x1 = x = usize = csize = 0;
         x2 = 0xffffffff;
+        return true;
     }
+    return true;
 }
 
 __device__ int get4(int &itr, const char *in)
@@ -1140,7 +1161,7 @@ paq9_cuda(
     char **output,
     int num_of_chunks, int mode, int memory_level)
 {
-    int tid=get_tid();
+    int tid = get_tid();
 
     if (tid >= num_of_chunks)
         return;
@@ -1153,13 +1174,15 @@ paq9_cuda(
     // printf("%8d KiB\b\b\b\b\b\b\b\b\b\b\b\b", allocated >> 10);
 
     // // COmpress
-    if (mode == 0)
+    if (mode == COMPRESS)
     {
 
         int itr = 0;
         Encoder encoder(mode, output[tid], input_size[tid], itr);
         int ch;
+        output[tid][encoder.iterator_size++] = '0';
         itr = 0;
+        int store_mode = 0;
         while (itr < input_size[tid])
         {
             ch = (unsigned char)input[tid][itr];
@@ -1171,37 +1194,70 @@ paq9_cuda(
             else
                 for (int i = 8; i >= 0; --i)
                     encoder.code(ch >> i & 1);
-            encoder.count();
+            if (!encoder.count())
+            {
+                store_mode = 1;
+                break;
+            }
             lzp[tid]->update(ch);
         }
-        encoder.flush();
+        if (!encoder.flush())
+        {
+            store_mode = 1;
+        }
+        if (store_mode)
+        {
+            encoder.iterator_size = 0;
+            output[tid][encoder.iterator_size++] = '1';
+
+            itr = 0;
+            while (itr < input_size[tid])
+            {
+                output[tid][encoder.iterator_size++] = input[tid][itr++];
+            }
+        }
         output_size[tid] = encoder.iterator_size;
     }
     else
     {
-        // decompress
-        int itr = 0;
         int itr2 = 0;
-        int usize = input_size[tid];
-        // get4(itr, input[tid]);
-        // get4(itr, input[tid]); // csize
+        // decompress
 
-        Encoder encoder(mode, input[tid], input_size[tid], itr);
-
-        while (usize--)
+        Encoder encoder(mode, input[tid], input_size[tid], 0);
+        if (input[tid][encoder.iterator_size++] == '1')
         {
-            int cp = lzp[tid]->predict_char();
-            if (encoder.code() == 0)
+            while (itr2 < input_size[tid])
             {
-                cp = 1;
-                while (cp < 256)
-                    cp += cp + encoder.code();
-                cp &= 255;
+                output[tid][encoder.iterator_size++] = input[tid][itr2]++;
             }
-            output[tid][itr2++] = cp;
-            lzp[tid]->update(cp);
         }
-        output_size[tid] = itr2;
+        else
+        {
+            int usize;
+            usize = get4(encoder.iterator_size, input[tid]);
+            get4(encoder.iterator_size, input[tid]); // csize
+
+            while (usize--)
+            {
+                int cp = lzp[tid]->predict_char();
+                if (encoder.code() == 0)
+                {
+                    cp = 1;
+                    while (cp < 256)
+                        cp += cp + encoder.code();
+                    cp &= 255;
+                }
+                output[tid][itr2++] = cp;
+                lzp[tid]->update(cp);
+
+                if (encoder.iterator_size < input_size[tid])
+                {
+                    usize = get4(encoder.iterator_size, input[tid]);
+                    get4(encoder.iterator_size, input[tid]); // csize
+                }
+            }
+            output_size[tid] = itr2;
+        }
     }
 
     // Free this thread's dynamically-allocated objects now that its chunk
@@ -1217,7 +1273,31 @@ paq9_cuda(
     lzp[tid] = 0;
     allocator[tid] = 0;
 }
+void put4(U32 c, int &iterator_size, char *inout)
+{
+    inout[iterator_size++] = char(c >> 24);
+    inout[iterator_size++] = char(c >> 16);
+    inout[iterator_size++] = char(c >> 8);
+    inout[iterator_size++] = char(c);
+}
 
+// Read/write a 4 byte big-endian number from file
+unsigned int get4_stream(std::istream &in)
+{
+    unsigned int r = in.get();
+    r = r * 256 + in.get();
+    r = r * 256 + in.get();
+    r = r * 256 + in.get();
+    return r;
+}
+
+void put4_stream(U32 c, std::ostream &out)
+{
+    out.put((c >> 24) & 0xFF);
+    out.put((c >> 16) & 0xFF);
+    out.put((c >> 8) & 0xFF);
+    out.put(c & 0xFF);
+}
 void compress(char *destination_file, char *source_file)
 {
 
@@ -1254,12 +1334,9 @@ void compress(char *destination_file, char *source_file)
     }
     source.close();
 
-
-
-     std::cout<<"Number of Chunks" << num_of_chunks << std::endl;
-     std::cout<<"Total Size "<<1.0*total_size/MB<<" MB "<<std::endl;
-     std::cout<<"Chunk Size "<<(1.0*total_size/MB)/num_of_chunks<<" MB "<<std::endl;
-
+    std::cout << "Number of Chunks: " << num_of_chunks << std::endl;
+    std::cout << "Total Size: " << 1.0 * total_size / MB << " MB " << std::endl;
+    std::cout << "Chunk Size: " << (1.0 * chunk_size) / MB << " MB " << std::endl;
 
     // preparing for calling device function
 
@@ -1321,7 +1398,7 @@ void compress(char *destination_file, char *source_file)
         // because your kernel only copies data.
         cudaMalloc(
             &temp_d_output[i],
-            input_size[i] * sizeof(char));
+            (input_size[i] + 2) * sizeof(char));
 
         // --------------------------------------------------
         // Copy input chunk: HOST -> DEVICE
@@ -1363,7 +1440,7 @@ void compress(char *destination_file, char *source_file)
 
     // initialize the gpu classes
     // Heap Resize
-    size_t heapSize = 4095* 1024 * 1024; // 512 MB
+    size_t heapSize = 4095 * 1024 * 1024; // 512 MB
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
 
     cudaError_t err1 = cudaGetLastError();
@@ -1390,23 +1467,29 @@ void compress(char *destination_file, char *source_file)
 
     ////////////////////paq9_cuda call////////////////////////////
     int mode = COMPRESS;
+
+    std::cout << "Assigned block: " << blocks << std::endl;
+    threads = std::min(threads, (int)num_of_chunks);
+    std::cout << "Assigned threads: " << threads << std::endl;
+    std::cout << "Total threads: " << blocks * threads << std::endl;
+
     paq9_cuda<<<blocks, threads>>>(
         d_input_size,
         d_input,
         d_output_size,
         d_output,
-        num_of_chunks, 0, memory_level);
+        num_of_chunks, mode, memory_level);
 
     cudaDeviceSynchronize();
 
     err1 = cudaGetLastError();
     if (err1 != cudaSuccess)
-        std::cerr << "Launch error: "
+        std::cerr << "Launch error paq9: "
                   << cudaGetErrorString(err1) << '\n';
 
     err1 = cudaDeviceSynchronize();
     if (err1 != cudaSuccess)
-        std::cerr << "Kernel error: "
+        std::cerr << "Kernel error paq9: "
                   << cudaGetErrorString(err1) << '\n';
 
     // --------------------------------------------------
@@ -1458,20 +1541,309 @@ void compress(char *destination_file, char *source_file)
     delete[] temp_d_input;
     delete[] temp_d_output;
 
+    // Inside your main writing logic:
     std::ofstream dest(destination_file, std::ios::binary);
-    dest.write("pQ9", 3);
+    if (!dest)
+    {
+        // Handle file open error
+    }
+
+    dest.write("PAQ9-CUDA", 9);
     dest.put(1);
     dest.write("1", 1);
     dest.write(source_file, strlen(source_file));
+    dest.put(0);
+    dest.put('c');
+
+    put4_stream((U32)(num_of_chunks), dest);
+    int total_input = 0, total_output = 0;
     for (size_t i = 0; i < num_of_chunks; i++)
     {
         size_t current_size =
             min(chunk_size, total_size - i * chunk_size);
 
+        put4_stream((U32)(current_size), dest);
         dest.write(output[i], output_size[i]);
-        std::cout << input_size[i] << " " << output_size[i] << std::endl;
+        total_input += input_size[i];
+        total_output += output_size[i];
+        std::cout << input_size[i] << " Byte -> " << output_size[i] << " Byte" << std::endl;
     }
     dest.close();
+    std::cout << "Total: " << total_input << " Byte -> " << total_output << " Byte" << std::endl;
+}
+
+void decompress(char *destination_file, char *source_file)
+{
+
+    constexpr size_t MB = 1024 * 1024;
+    size_t chunk_size = memory_chunk_size * MB;
+
+    std::ifstream source(source_file, std::ios::binary);
+    if (!source)
+    {
+        std::cerr << "Cannot open " << source_file << std::endl;
+        exit(1);
+    }
+    source.seekg(0, std::ios::end);
+    size_t total_size = source.tellg();
+
+    size_t num_of_chunks =
+        (total_size + chunk_size - 1) / chunk_size;
+
+    char **src_file = new char *[num_of_chunks];
+    source.clear();
+    source.seekg(0, std::ios::beg);
+
+    std::vector<int> input_size(num_of_chunks);
+
+    for (size_t i = 0; i < num_of_chunks; i++)
+    {
+        size_t current_size =
+            min(chunk_size, total_size - i * chunk_size);
+
+        src_file[i] = new char[current_size];
+
+        source.read(src_file[i], current_size);
+        input_size[i] = current_size;
+    }
+    source.close();
+
+    std::cout << "Number of Chunks: " << num_of_chunks << std::endl;
+    std::cout << "Total Size: " << 1.0 * total_size / MB << " MB " << std::endl;
+    std::cout << "Chunk Size: " << (1.0 * chunk_size) / MB << " MB " << std::endl;
+
+    // preparing for calling device function
+
+    // --------------------------------------------------
+    // Device pointer arrays
+    // --------------------------------------------------
+
+    char **d_input;
+    char **d_output;
+
+    cudaMalloc(&d_input, num_of_chunks * sizeof(char *));
+    cudaMalloc(&d_output, num_of_chunks * sizeof(char *));
+
+    // --------------------------------------------------
+    // Size arrays
+    // --------------------------------------------------
+
+    int *d_input_size;
+    int *d_output_size;
+
+    cudaMalloc(&d_input_size,
+               num_of_chunks * sizeof(int));
+
+    cudaMalloc((void **)&d_output_size, num_of_chunks * sizeof(int));
+    // --------------------------------------------------
+    // Copy input sizes: HOST -> DEVICE
+    // --------------------------------------------------
+
+    cudaMemcpy(
+        d_input_size,
+        input_size.data(),
+        num_of_chunks * sizeof(int),
+        cudaMemcpyHostToDevice);
+
+    // --------------------------------------------------
+    // Temporary host arrays containing device pointers
+    // --------------------------------------------------
+
+    char **temp_d_input =
+        new char *[num_of_chunks];
+
+    char **temp_d_output =
+        new char *[num_of_chunks];
+
+    // --------------------------------------------------
+    // Allocate each chunk on DEVICE
+    // --------------------------------------------------
+
+    for (int i = 0; i < num_of_chunks; i++)
+    {
+        // Input
+        cudaMalloc(
+            &temp_d_input[i],
+            input_size[i] * sizeof(char));
+
+        // Output
+        //
+        // Currently output size == input size
+        // because your kernel only copies data.
+        cudaMalloc(
+            &temp_d_output[i],
+            (input_size[i] + 2) * sizeof(char));
+
+        // --------------------------------------------------
+        // Copy input chunk: HOST -> DEVICE
+        // --------------------------------------------------
+
+        cudaMemcpy(
+            temp_d_input[i],
+            src_file[i],
+            input_size[i] * sizeof(char),
+            cudaMemcpyHostToDevice);
+    }
+
+    // --------------------------------------------------
+    // Copy DEVICE POINTER ARRAYS to DEVICE
+    // --------------------------------------------------
+
+    cudaMemcpy(
+        d_input,
+        temp_d_input,
+        num_of_chunks * sizeof(char *),
+        cudaMemcpyHostToDevice);
+
+    cudaMemcpy(
+        d_output,
+        temp_d_output,
+        num_of_chunks * sizeof(char *),
+        cudaMemcpyHostToDevice);
+
+    // --------------------------------------------------
+    // Launch kernel
+    // --------------------------------------------------
+
+    int threads = 256;
+
+    int blocks =
+        (num_of_chunks + threads - 1) / threads;
+
+    // std::cout << blocks << " " << threads << std::endl;
+
+    // initialize the gpu classes
+    // Heap Resize
+    size_t heapSize = 4095 * 1024 * 1024; // 512 MB
+    cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
+
+    cudaError_t err1 = cudaGetLastError();
+    if (err1 != cudaSuccess)
+        std::cerr << "Heap Launch error: "
+                  << cudaGetErrorString(err1) << '\n';
+
+    err1 = cudaDeviceSynchronize();
+    if (err1 != cudaSuccess)
+        std::cerr << "Heap Kernel error: "
+                  << cudaGetErrorString(err1) << '\n';
+
+    init<<<1, 1>>>();
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+        std::cerr << "Launch error: "
+                  << cudaGetErrorString(err) << '\n';
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess)
+        std::cerr << "Kernel error: "
+                  << cudaGetErrorString(err) << '\n';
+
+    ////////////////////paq9_cuda call////////////////////////////
+    int mode = COMPRESS;
+
+    std::cout << "Assigned block: " << blocks << std::endl;
+    threads = std::min(threads, (int)num_of_chunks);
+    std::cout << "Assigned threads: " << threads << std::endl;
+    std::cout << "Total threads: " << blocks * threads << std::endl;
+
+    paq9_cuda<<<blocks, threads>>>(
+        d_input_size,
+        d_input,
+        d_output_size,
+        d_output,
+        num_of_chunks, mode, memory_level);
+
+    cudaDeviceSynchronize();
+
+    err1 = cudaGetLastError();
+    if (err1 != cudaSuccess)
+        std::cerr << "Launch error paq9: "
+                  << cudaGetErrorString(err1) << '\n';
+
+    err1 = cudaDeviceSynchronize();
+    if (err1 != cudaSuccess)
+        std::cerr << "Kernel error paq9: "
+                  << cudaGetErrorString(err1) << '\n';
+
+    // --------------------------------------------------
+    // Copy output sizes: DEVICE -> HOST
+    // --------------------------------------------------
+
+    // FIX: Allocate memory for the host integer array before copying
+    int *output_size = (int *)malloc(num_of_chunks * sizeof(int));
+    cudaMemcpy(output_size, d_output_size, num_of_chunks * sizeof(int), cudaMemcpyDeviceToHost);
+
+    // --------------------------------------------------
+    // Copy output chunks: DEVICE -> HOST
+    // --------------------------------------------------
+
+    // FIX: Allocate memory for the array of host pointers before copying
+    char **output = new char *[num_of_chunks];
+
+    for (int i = 0; i < num_of_chunks; i++)
+    {
+        // FIX: Allocate memory for each specific chunk array before copying
+        output[i] = new char[output_size[i]];
+        cudaMemcpy(
+            output[i],
+            temp_d_output[i],
+            output_size[i] * sizeof(char),
+            cudaMemcpyDeviceToHost);
+    }
+
+    // --------------------------------------------------
+    // Free DEVICE chunk memory
+    // --------------------------------------------------
+
+    for (int i = 0; i < num_of_chunks; i++)
+    {
+        cudaFree(temp_d_input[i]);
+        cudaFree(temp_d_output[i]);
+    }
+
+    // --------------------------------------------------
+    // Free DEVICE arrays
+    // --------------------------------------------------
+
+    cudaFree(d_input);
+    cudaFree(d_output);
+
+    cudaFree(d_input_size);
+    cudaFree(d_output_size);
+
+    delete[] temp_d_input;
+    delete[] temp_d_output;
+
+    // Inside your main writing logic:
+    std::ofstream dest(destination_file, std::ios::binary);
+    if (!dest)
+    {
+        // Handle file open error
+    }
+
+    dest.write("PAQ9-CUDA", 9);
+    dest.put(1);
+    dest.write("1", 1);
+    dest.write(source_file, strlen(source_file));
+    dest.put(0);
+    dest.put('c');
+
+    put4_stream((U32)(num_of_chunks), dest);
+    int total_input = 0, total_output = 0;
+    for (size_t i = 0; i < num_of_chunks; i++)
+    {
+        size_t current_size =
+            min(chunk_size, total_size - i * chunk_size);
+
+        put4_stream((U32)(current_size), dest);
+        dest.write(output[i], output_size[i]);
+        total_input += input_size[i];
+        total_output += output_size[i];
+        std::cout << input_size[i] << " Byte -> " << output_size[i] << " Byte" << std::endl;
+    }
+    dest.close();
+    std::cout << "Total: " << total_input << " Byte -> " << total_output << " Byte" << std::endl;
 }
 
 int main(int argc, char **args)
