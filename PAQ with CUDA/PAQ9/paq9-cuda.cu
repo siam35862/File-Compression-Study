@@ -1491,7 +1491,7 @@ void compress(char *destination_file, char *source_file)
 
     // initialize the gpu classes
     // Heap Resize
-    size_t heapSize = 4095 * 1024 * 1024; // 512 MB
+    size_t heapSize = 4095 * 1024 * 1024; // 4095 MB
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
 
     cudaError_t err1 = cudaGetLastError();
