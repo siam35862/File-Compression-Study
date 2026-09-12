@@ -2,20 +2,32 @@
 #include <vector>
 #include <string>
 #include <fstream>
-#include <sstream>
 #include <cuda_runtime.h>
 #include <chrono>
 #include <cstring> // For strlen
 #include <assert.h>
 
+
+//typedef
+// 8, 16, 32 bit unsigned types (adjust as appropriate)
+typedef unsigned char U8;
+typedef unsigned short U16;
+typedef unsigned int U32;
+
+//define
 #define MAX_THREADS 1024
-int memory_level = 1;       // default memory level
-int memory_chunk_level = 1; // default memory chunks
-int level = 1;
 #define COMPRESS 0
 #define DECOMPRESS 1
+
+constexpr size_t MB = 1024 * 1024;
+int memory_level = 1;       // default memory level MEM=1<<22+memory_level;
+int memory_chunk_level = 1; // default memory chunks 1MB
+int level = 1;
 int total_uncompressed_size = 0;
 int total_compressed_size = 0;
+int maximumHeapLimit = 8;     // default heap limit
+int maximumFreeMemory = 1024; // default consider 1GB memory has free
+
 __device__ int get_tid()
 {
     return blockIdx.x * blockDim.x + threadIdx.x;
@@ -31,12 +43,12 @@ public:
         total_allocated_size = 0;
     }
     template <class T>
-    __device__ void alloc(T *&p, int allocate_size)
+    __device__ void alloc(T *&p, U32 allocate_size)
     {
         p = new T[allocate_size]();
         if (!p)
         {
-            printf("Error: Out of memory (failed to allocate %d elements)\n", allocate_size * sizeof(T));
+            printf("Error: Out of memory (failed to allocate %zu elements)\n", allocate_size * sizeof(T));
             total_allocated_size = -1;
             return;
         }
@@ -45,11 +57,6 @@ public:
 };
 
 __device__ Alloc *allocator[MAX_THREADS];
-
-// 8, 16, 32 bit unsigned types (adjust as appropriate)
-typedef unsigned char U8;
-typedef unsigned short U16;
-typedef unsigned int U32;
 
 ///////////////////////////// Squash //////////////////////////////
 
@@ -571,7 +578,7 @@ __device__ void Mix::update(int y)
     {
         error *= 4 - (++wt[context] & 3);
     }
-    error = error + 8 >> 4;
+    error = (error + 8) >> 4;
     wt[context] += x1 * error & -4;
     wt[context + 1] += x2 * error;
 }
@@ -675,7 +682,7 @@ __device__ HashTable<B>::~HashTable()
 
 ////////////////////////// LZP /////////////////////////
 
-__device__ U32 MEM = 1 << 22 + 1; // Global memory limit, 1 << 22+(memory option)
+__device__ U32 MEM = 1 << (22 + 1); // Global memory limit, 1 << 22+(memory option)
 __device__ inline bool isalpha_device(char ch)
 {
     return (ch >= 'A' && ch <= 'Z') ||
@@ -1328,10 +1335,87 @@ int get_n_from_mb(double mb)
     }
     return 9; // mb যদি সর্বোচ্চ থ্রেশহোল্ডও ছাড়িয়ে যায়, সর্বোচ্চ n রিটার্ন
 }
+
+size_t get_maximum_heap_limit()
+{
+    int deviceCount = 0;
+
+    cudaError_t err = cudaGetDeviceCount(&deviceCount);
+
+    if (err != cudaSuccess || deviceCount == 0)
+    {
+        std::cerr << "No CUDA-capable NVIDIA GPU found.\n";
+        exit(1);
+    }
+
+    int device = 0;
+    cudaDeviceProp prop;
+
+    err = cudaGetDeviceProperties(&prop, device);
+
+    if (err != cudaSuccess)
+    {
+        std::cerr << "Failed to get CUDA device properties: "
+                  << cudaGetErrorString(err) << '\n';
+        exit(1);
+    }
+
+    size_t low = 0;
+    size_t high = prop.totalGlobalMem;
+    size_t bestLimit = 0;
+
+    // Binary search to find the maximum allowed heap size
+    while (low <= high)
+    {
+        size_t mid = low + (high - low) / 2;
+
+        cudaError_t err = cudaDeviceSetLimit(cudaLimitMallocHeapSize, mid);
+
+        if (err == cudaSuccess)
+        {
+            bestLimit = mid;
+            low = mid + 1; // Try a larger size
+        }
+        else
+        {
+            // If high is at the max possible value to avoid underflow
+            if (high == 0 || mid == 0)
+                break;
+            high = mid - 1; // Try a smaller size
+        }
+    }
+
+    cudaError_t err = cudaDeviceSetLimit(cudaLimitMallocHeapSize, bestLimit);
+
+    if (err != cudaSuccess)
+    {
+        cudaError_t err1 = cudaGetLastError();
+        if (err1 != cudaSuccess)
+            std::cerr << "Heap Launch error: "
+                      << cudaGetErrorString(err1) << '\n';
+        exit(1);
+    }
+}
+
+size_t getMaximumFreeMemory()
+{
+    size_t free_byte = 0;
+    size_t total_byte = 0;
+
+    cudaError_t err = cudaMemGetInfo(&free_byte, &total_byte);
+
+    if (err != cudaSuccess)
+    {
+        std::cerr << "Failed to get memory info: " << cudaGetErrorString(err) << '\n';
+        exit(1);
+    }
+    return free_byte;
+}
+
 void compress(char *destination_file, char *source_file)
 {
 
-    constexpr size_t MB = 1024 * 1024;
+    
 
     memory_chunk_level = (1 << (level - 1));
     size_t chunk_size = memory_chunk_level * MB;
@@ -1491,7 +1575,7 @@ void compress(char *destination_file, char *source_file)
 
     // initialize the gpu classes
     // Heap Resize
-    size_t heapSize = 4095 * 1024 * 1024; // 4095 MB
+    size_t heapSize = 4095U * 1024 * 1024; // 4095 MB
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
 
     cudaError_t err1 = cudaGetLastError();
@@ -1840,7 +1924,7 @@ void decompress(const char *destination_file, const char *source_file)
 
         // initialize the gpu classes
         // Heap Resize
-        size_t heapSize = 4095 * 1024 * 1024; // 512 MB
+        size_t heapSize = 4095U * 1024 * 1024; // 512 MB
         cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
 
         cudaError_t err1 = cudaGetLastError();
