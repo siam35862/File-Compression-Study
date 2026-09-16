@@ -69,7 +69,7 @@ typedef unsigned int U32;
 #define HEAP_SIZE 64 // MB
 constexpr size_t MB = 1024 * 1024;
 #define base_memory_level 19 // default base memory level, MEM=1<<base_memory_level+memory_level
-#define GPU_VRAM_LEVEL 4     // perchantage of VRAM , default 5 means 50% of VRAM will be used for compression
+#define GPU_VRAM_LEVEL 8     // perchantage of VRAM , default 5 means 50% of VRAM will be used for compression
 int memory_level = 1;        // default memory level MEM=1<<base_memory_level+memory_level;
 int chunk_MB = 1;            // default memory chunks 1MB
 int chunk_level = 1;
@@ -1834,7 +1834,7 @@ void decompress(const char *destination_file, const char *source_file)
             std::cout << "Your system does not have enough memory for running this compression/decompression algorithm.\n";
             exit(1);
         }
-        maximum_thread_per_device_call = 955;
+        
         int device_call_count = (num_of_chunks + maximum_thread_per_device_call - 1) / maximum_thread_per_device_call;
         std::cout << "Memory Chunk Level: " << chunk_MB << "MB" << endl;
         std::cout << "Memory Level: " << memory_level << endl;
