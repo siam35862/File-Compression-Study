@@ -513,10 +513,10 @@ int Predictor::predict_next_bit()
         return lzp->probability();
     else
     {
-        int pc = lzp->predict_char();               // mispredicted byte
-        int r = (pc + 256 >> 8 - bcount) == c0;      // c0 consistent with mispredicted byte?
-        U32 c4 = lzp->context4();                    // last 4 whole context bytes, shifted into LSB
-        U32 c8 = (lzp->context8() << 4) - 1;          // hash of last 7 bytes with 4 trailing 1 bits
+        int pc = lzp->predict_char();           // mispredicted byte
+        int r = (pc + 256 >> 8 - bcount) == c0; // c0 consistent with mispredicted byte?
+        U32 c4 = lzp->context4();               // last 4 whole context bytes, shifted into LSB
+        U32 c8 = (lzp->context8() << 4) - 1;    // hash of last 7 bytes with 4 trailing 1 bits
         if ((bcount & 3) == 0)
         { // nibble boundary?  Update context pointers
             pc &= -r;
@@ -689,12 +689,12 @@ static size_t get4(size_t &itr, const char *in)
 
 struct ChunkBuffers
 {
-    std::vector<U32> lzp_statemap;    // 0x200
-    std::vector<int> lzp_apm0;        // 0x20000  (APM n=0x10000)
-    std::vector<int> lzp_apm1;        // 0x80000  (APM n=0x40000)
-    std::vector<int> lzp_apm2;        // 0x200000 (APM n=0x100000)
-    std::vector<U8> lzp_buffer;       // g_MEM/8
-    std::vector<U32> lzp_table;       // g_MEM/32
+    std::vector<U32> lzp_statemap; // 0x200
+    std::vector<int> lzp_apm0;     // 0x20000  (APM n=0x10000)
+    std::vector<int> lzp_apm1;     // 0x80000  (APM n=0x40000)
+    std::vector<int> lzp_apm2;     // 0x200000 (APM n=0x100000)
+    std::vector<U8> lzp_buffer;    // g_MEM/8
+    std::vector<U32> lzp_table;    // g_MEM/32
 
     std::vector<U32> predictor_statemap[11]; // each 0x100
     std::vector<int> predictor_mix[10];      // each 0x400 (Mix n=0x200)
@@ -995,12 +995,12 @@ static int decideThreadCount(int num_of_chunks)
     }
 
     size_t maximum_memory = getAvailableMemoryBytes();
-    maximum_memory = 6 * maximum_memory / 10; // use at most 60%, like GPU_LEVEL=6
+    maximum_memory = 8 * maximum_memory / 10; // use at most 80%, like GPU_LEVEL=8
 
     size_t memory_per_thread = 2ULL * chunk_MB * MB + calculateThreadBufferBytes() + 1ULL * MB;
     int max_by_memory = (int)std::max<size_t>(1, maximum_memory / memory_per_thread);
 
-    int threads = std::min<int>(getHardwareThreadCount(), max_by_memory);
+    int threads = std::min<int>(getHardwareThreadCount()-2, max_by_memory);
     threads = std::min(threads, num_of_chunks);
     if (threads < 1)
         threads = 1;
@@ -1106,9 +1106,8 @@ void compress(const char *destination_file, const char *source_file)
         workers.reserve(batch);
         for (int i = 0; i < batch; i++)
         {
-            workers.emplace_back([&, i]() {
-                compressChunk(in_buf[i].data(), in_sizes[i], out_buf[i].data(), out_sizes[i], slots[i]);
-            });
+            workers.emplace_back([&, i]()
+                                 { compressChunk(in_buf[i].data(), in_sizes[i], out_buf[i].data(), out_sizes[i], slots[i]); });
         }
         for (auto &t : workers)
             t.join();
@@ -1246,7 +1245,7 @@ void decompress(const char *destination_file, const char *source_file)
             for (int i = 0; i < batch; i++)
             {
                 get4_stream(source); // original uncompressed chunk size (unused: the
-                                      // decoded stream is self-delimiting per block)
+                                     // decoded stream is self-delimiting per block)
                 size_t csize = get4_stream(source);
                 in_sizes[i] = csize;
                 in_buf[i].resize(csize);
@@ -1257,9 +1256,8 @@ void decompress(const char *destination_file, const char *source_file)
             workers.reserve(batch);
             for (int i = 0; i < batch; i++)
             {
-                workers.emplace_back([&, i]() {
-                    decompressChunk(in_buf[i].data(), in_sizes[i], out_buf[i].data(), out_sizes[i], slots[i]);
-                });
+                workers.emplace_back([&, i]()
+                                     { decompressChunk(in_buf[i].data(), in_sizes[i], out_buf[i].data(), out_sizes[i], slots[i]); });
             }
             for (auto &t : workers)
                 t.join();

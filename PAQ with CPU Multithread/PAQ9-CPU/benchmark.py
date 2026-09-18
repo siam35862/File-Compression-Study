@@ -55,7 +55,7 @@ from pathlib import Path
 
 
 MIN_LEVEL = 1
-MAX_LEVEL = 6
+MAX_LEVEL = 7
 
 
 # Add a useful explanation when the script is started without the five file paths.
@@ -311,10 +311,10 @@ def benchmark(args: argparse.Namespace) -> None:
     run_number = 0
     levels = range(MIN_LEVEL, MAX_LEVEL + 1)
     total_combinations = len(levels) * len(levels)
-    total_runs = 16 * 2  # one compression + one decompression each
+    total_runs =8 * 2  # one compression + one decompression each
 
     for chunk_level in range (1,9):
-        for memory_level in range (7,9):
+        for memory_level in range(8,9):
             # --- Compression: -c -<memory_level> <archive> -<chunk_level> <source> ---
             run_number += 1
             print_timed_line(
